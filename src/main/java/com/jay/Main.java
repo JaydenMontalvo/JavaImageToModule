@@ -1,28 +1,21 @@
-// Main.java — Roblox Color-by-Number Lua module generator
+// Main.java — Batch version: processes every PNG in a resources/ folder
 //
 // ─── QUICK START ──────────────────────────────────────────────────────────────
-//   1. Prepare your image in Photopea:
-//        a. Image > Mode > Indexed Color  (Colors = 24, Dither = None)
-//        b. Image > Image Size            (64 x 64, Resample = Nearest Neighbor)
-//        c. File > Export As > PNG
+//   1. Put all your 64x64 indexed PNGs into a folder called: resources/
+//      (in the same directory you run the command from)
 //
 //   2. Compile (once):
 //        javac -d out src/main/java/com/jay/Main.java
 //
 //   3. Run:
-//        java -cp out com.jay.Main <path/to/image.png> <ImageName>
+//        java -cp out com.jay.Main
 //
-//      Example:
-//        java -cp out com.jay.Main C:/Users/Jay/Pictures/sunset.png Sunset
+//      Optional — specify a custom folder:
+//        java -cp out com.jay.Main path/to/my/images
 //
-//   4. A file named <ImageName>.lua is created in your working directory.
-//      Paste it into:  ReplicatedStorage > ColorByNumber > Images > <ImageName>
-//      Then add '<ImageName>' to the IMAGE_NAMES list in ImageRegistry.
-//
-// ─── NOTES ────────────────────────────────────────────────────────────────────
-//   • Images are automatically resized to 64×64 with Nearest Neighbor if needed.
-//   • Only the first 24 unique colors are kept; extras snap to the nearest match.
-//   • Run with no arguments to see this usage summary.
+//   4. All .lua files are created in an output/ folder.
+//      Paste each into: ReplicatedStorage > ColorByNumber > Images > <ImageName>
+//      Then add each name to the IMAGE_NAMES list in ImageRegistry.
 // ──────────────────────────────────────────────────────────────────────────────
 
 package com.jay;
@@ -40,24 +33,50 @@ public class Main {
     static final int GRID = 64;
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 2) {
-            System.out.println("Usage:  java -cp out com.jay.Main <path/to/image.png> <ImageName>");
-            System.out.println("Example: java -cp out com.jay.Main C:/Users/Jay/Pictures/sunset.png Sunset");
-            System.exit(0);
-        }
+        String inputFolder = (args.length >= 1) ? args[0] : "images";
+        String outputFolder = "output";
 
-        String imagePath = args[0];
-        String imageName = args[1];
-
-        File file = new File(imagePath);
-        if (!file.exists()) {
-            System.err.println("File not found: " + imagePath);
+        File inputDir = new File(inputFolder);
+        if (!inputDir.exists() || !inputDir.isDirectory()) {
+            System.err.println("Input folder not found: " + inputFolder);
+            System.err.println("Create a folder named '" + inputFolder + "' and put your PNG images inside.");
             System.exit(1);
         }
 
-        System.out.println("Processing " + imagePath + " as '" + imageName + "'...");
+        File outputDir = new File(outputFolder);
+        if (!outputDir.exists()) outputDir.mkdirs();
 
+        File[] pngFiles = inputDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".png"));
+        if (pngFiles == null || pngFiles.length == 0) {
+            System.err.println("No PNG files found in: " + inputFolder);
+            System.exit(1);
+        }
+
+        System.out.println("Found " + pngFiles.length + " PNG(s) in '" + inputFolder + "' -> outputting to '" + outputFolder + "'\n");
+
+        List<String> processedNames = new ArrayList<>();
+
+        for (File file : pngFiles) {
+            // Use the filename without extension as the image name
+            String imageName = file.getName().replaceFirst("(?i)\\.png$", "");
+            System.out.println("Processing: " + file.getName() + " -> " + imageName + ".lua");
+            processImage(file, imageName, outputDir);
+            processedNames.add(imageName);
+        }
+
+        System.out.println("\n✓ Done! Processed " + processedNames.size() + " image(s).");
+        System.out.println("\nAdd these to IMAGE_NAMES in ImageRegistry:");
+        for (String name : processedNames) {
+            System.out.println("  \"" + name + "\",");
+        }
+    }
+
+    static void processImage(File file, String imageName, File outputDir) throws Exception {
         BufferedImage img = ImageIO.read(file);
+        if (img == null) {
+            System.err.println("  SKIP: Could not read image: " + file.getName());
+            return;
+        }
 
         if (img.getWidth() != GRID || img.getHeight() != GRID) {
             System.out.printf("  Resizing (%dx%d) -> (%dx%d) with Nearest Neighbor%n",
@@ -95,9 +114,7 @@ public class Main {
         }
 
         if (remapped) {
-            System.out.println("  WARNING: image has more than " + MAX_COLORS + " unique colors.");
-            System.out.println("  Extra colors snapped to nearest palette entry.");
-            System.out.println("  Re-export from Photopea with Colors=" + MAX_COLORS + ", Dither=None for clean results.");
+            System.out.println("  WARNING: image has more than " + MAX_COLORS + " unique colors — extra colors snapped to nearest.");
         }
 
         int[][] colorMap = new int[GRID][GRID];
@@ -134,6 +151,7 @@ public class Main {
 
         sb.append("return {\n");
         sb.append("\tname      = \"").append(imageName).append("\",\n");
+        sb.append("\tprice     = 1048,\n");
         sb.append("\tthumbnail = \"rbxassetid://0\",  -- replace with real asset ID\n");
         sb.append("\twidth     = 64,\n");
         sb.append("\theight    = 64,\n");
@@ -141,14 +159,12 @@ public class Main {
         sb.append("\tcolorMap  = colorMap,\n");
         sb.append("}\n");
 
-        String outPath = imageName + ".lua";
-        try (PrintWriter writer = new PrintWriter(new FileWriter(outPath))) {
+        File outFile = new File(outputDir, imageName + ".lua");
+        try (PrintWriter writer = new PrintWriter(new FileWriter(outFile))) {
             writer.print(sb);
         }
 
-        System.out.println("  Done -> " + outPath);
-        System.out.println("  Paste into: ReplicatedStorage.ColorByNumber.Images." + imageName);
-        System.out.println("  Add '" + imageName + "' to ImageRegistry IMAGE_NAMES list");
+        System.out.println("  -> " + outFile.getPath());
     }
 
     static int nearestColor(int rgb, List<int[]> palette) {
